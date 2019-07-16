@@ -831,6 +831,12 @@ config QMP_DEBUGFS_CLIENT
 	  This options enables a driver which allows clients to send messages
 	  to Alway On processor using QMP transport.
 
+config SECBOOT_FUSE
+	bool "Enable Secure boot fuse Proc Interface"
+	help
+	  Provide a interface for reading CPU secure boot fuse setting. Interface located in
+	  /proc/secboot_fuse_reg
+
 source "drivers/soc/qcom/memshare/Kconfig"
 
 config MSM_REMOTEQDSS

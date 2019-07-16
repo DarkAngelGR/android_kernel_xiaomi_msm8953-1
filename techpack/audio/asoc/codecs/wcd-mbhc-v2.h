@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -14,9 +14,7 @@
 
 #include <linux/wait.h>
 #include <linux/stringify.h>
-#include <linux/power_supply.h>
 #include "wcdcal-hwdep.h"
-#include <sound/jack.h>
 
 #define TOMBAK_MBHC_NC	0
 #define TOMBAK_MBHC_NO	1
@@ -27,156 +25,6 @@
 /* z value defined in Ohms */
 #define WCD_MONO_HS_MIN_THR	2
 #define WCD_MBHC_STRINGIFY(s)  __stringify(s)
-
-#define WCD_MBHC_REGISTER(rid, rreg, rmask, rshift, rinvert) \
-{ .id = rid, .reg = rreg, .mask = rmask, .offset = rshift, .invert = rinvert }
-
-#define WCD_MBHC_RSC_LOCK(mbhc)			\
-{							\
-	pr_debug("%s: Acquiring BCL\n", __func__);	\
-	mutex_lock(&mbhc->codec_resource_lock);		\
-	pr_debug("%s: Acquiring BCL done\n", __func__);	\
-}
-
-#define WCD_MBHC_RSC_UNLOCK(mbhc)			\
-{							\
-	pr_debug("%s: Release BCL\n", __func__);	\
-	mutex_unlock(&mbhc->codec_resource_lock);	\
-}
-
-#define WCD_MBHC_RSC_ASSERT_LOCKED(mbhc)		\
-{							\
-	WARN_ONCE(!mutex_is_locked(&mbhc->codec_resource_lock), \
-		  "%s: BCL should have acquired\n", __func__); \
-}
-
-/*
- * Macros to update and read mbhc register bits. Check for
- * "0" before updating or reading the register, because it
- * is possible that one codec wants to write to that bit and
- * other codec does not.
- */
-#define WCD_MBHC_REG_UPDATE_BITS(function, val)         \
-do {                                                    \
-	if (mbhc->wcd_mbhc_regs[function].reg) {        \
-		snd_soc_update_bits(mbhc->codec,	\
-		mbhc->wcd_mbhc_regs[function].reg,	\
-		mbhc->wcd_mbhc_regs[function].mask,	\
-		val << (mbhc->wcd_mbhc_regs[function].offset)); \
-	}                                               \
-} while (0)
-
-#define WCD_MBHC_REG_READ(function, val)	        \
-do {                                                    \
-	if (mbhc->wcd_mbhc_regs[function].reg) {        \
-		val = (((snd_soc_read(mbhc->codec,	\
-		mbhc->wcd_mbhc_regs[function].reg)) &	\
-		(mbhc->wcd_mbhc_regs[function].mask)) >> \
-		(mbhc->wcd_mbhc_regs[function].offset)); \
-	} else {                                         \
-		val = -EINVAL;                           \
-	}                                                \
-} while (0)
-
-#define WCD_MBHC_CAL_SIZE(buttons, rload) ( \
-	sizeof(struct wcd_mbhc_general_cfg) + \
-	sizeof(struct wcd_mbhc_plug_detect_cfg) + \
-	((sizeof(s16) + sizeof(s16)) * buttons) + \
-	    sizeof(struct wcd_mbhc_plug_type_cfg) + \
-	sizeof(struct wcd_mbhc_btn_detect_cfg) + \
-	sizeof(struct wcd_mbhc_imped_detect_cfg) + \
-		((sizeof(u16) + sizeof(u16)) * rload) \
-	)
-
-#define WCD_MBHC_CAL_GENERAL_PTR(cali) ( \
-	(struct wcd_mbhc_general_cfg *) cali)
-#define WCD_MBHC_CAL_PLUG_DET_PTR(cali) ( \
-	(struct wcd_mbhc_plug_detect_cfg *) \
-	&(WCD_MBHC_CAL_GENERAL_PTR(cali)[1]))
-#define WCD_MBHC_CAL_PLUG_TYPE_PTR(cali) ( \
-	(struct wcd_mbhc_plug_type_cfg *) \
-	&(WCD_MBHC_CAL_PLUG_DET_PTR(cali)[1]))
-#define WCD_MBHC_CAL_BTN_DET_PTR(cali) ( \
-	    (struct wcd_mbhc_btn_detect_cfg *) \
-	&(WCD_MBHC_CAL_PLUG_TYPE_PTR(cali)[1]))
-#define WCD_MBHC_CAL_IMPED_DET_PTR(cali) ( \
-	(struct wcd_mbhc_imped_detect_cfg *) \
-	(((void *)&WCD_MBHC_CAL_BTN_DET_PTR(cali)[1]) + \
-	(WCD_MBHC_CAL_BTN_DET_PTR(cali)->num_btn * \
-	(sizeof(WCD_MBHC_CAL_BTN_DET_PTR(cali)->_v_btn_low[0]) + \
-	sizeof(WCD_MBHC_CAL_BTN_DET_PTR(cali)->_v_btn_high[0])))) \
-	)
-
-#define WCD_MBHC_CAL_MIN_SIZE ( \
-	sizeof(struct wcd_mbhc_general_cfg) + \
-	sizeof(struct wcd_mbhc_plug_detect_cfg) + \
-	sizeof(struct wcd_mbhc_plug_type_cfg) + \
-	sizeof(struct wcd_mbhc_btn_detect_cfg) + \
-	sizeof(struct wcd_mbhc_imped_detect_cfg) + \
-	(sizeof(u16)*2)  \
-	)
-
-#define WCD_MBHC_CAL_BTN_SZ(cfg_ptr) ( \
-	sizeof(struct wcd_mbhc_btn_detect_cfg) + \
-	(cfg_ptr->num_btn * (sizeof(cfg_ptr->_v_btn_low[0]) + \
-			sizeof(cfg_ptr->_v_btn_high[0]))))
-
-#define WCD_MBHC_CAL_IMPED_MIN_SZ ( \
-	sizeof(struct wcd_mbhc_imped_detect_cfg) + sizeof(u16) * 2)
-
-#define WCD_MBHC_CAL_IMPED_SZ(cfg_ptr) ( \
-	sizeof(struct wcd_mbhc_imped_detect_cfg) + \
-	(cfg_ptr->_n_rload * \
-	(sizeof(cfg_ptr->_rload[0]) + sizeof(cfg_ptr->_alpha[0]))))
-
-#define WCD_MBHC_JACK_MASK (SND_JACK_HEADSET | SND_JACK_OC_HPHL | \
-			   SND_JACK_OC_HPHR | SND_JACK_LINEOUT | \
-			   SND_JACK_MECHANICAL | SND_JACK_MICROPHONE2 | \
-			   SND_JACK_UNSUPPORTED)
-
-#define WCD_MBHC_JACK_BUTTON_MASK (SND_JACK_BTN_0 | SND_JACK_BTN_1 | \
-				  SND_JACK_BTN_2 | SND_JACK_BTN_3 | \
-				  SND_JACK_BTN_4 | SND_JACK_BTN_5)
-#define OCP_ATTEMPT 20
-#ifdef CONFIG_MACH_XIAOMI_TISSOT
-#define HS_DETECT_PLUG_TIME_MS (2500)
-#else
-#define HS_DETECT_PLUG_TIME_MS (3 * 1000)
-#endif
-#define SPECIAL_HS_DETECT_TIME_MS (2 * 1000)
-#if (defined CONFIG_MACH_XIAOMI_MIDO) || (defined CONFIG_MACH_XIAOMI_TISSOT)
-#define MBHC_BUTTON_PRESS_THRESHOLD_MIN 750
-#else
-#define MBHC_BUTTON_PRESS_THRESHOLD_MIN 250
-#endif
-#define GND_MIC_SWAP_THRESHOLD 4
-#define GND_MIC_USBC_SWAP_THRESHOLD 2
-#define WCD_FAKE_REMOVAL_MIN_PERIOD_MS 100
-#define HS_VREF_MIN_VAL 1400
-#define FW_READ_ATTEMPTS 15
-#define FW_READ_TIMEOUT 4000000
-#define FAKE_REM_RETRY_ATTEMPTS 3
-#define MAX_IMPED 60000
-
-#ifdef CONFIG_MACH_XIAOMI_TISSOT
-#define WCD_MBHC_BTN_PRESS_COMPL_TIMEOUT_MS  200
-#else
-#define WCD_MBHC_BTN_PRESS_COMPL_TIMEOUT_MS  50
-#endif
-#define ANC_DETECT_RETRY_CNT 7
-#define WCD_MBHC_SPL_HS_CNT  1
-
-enum wcd_mbhc_detect_logic {
-	WCD_DETECTION_LEGACY,
-	WCD_DETECTION_ADC,
-};
-
-enum wcd_mbhc_cs_mb_en_flag {
-	WCD_MBHC_EN_CS = 0,
-	WCD_MBHC_EN_MB,
-	WCD_MBHC_EN_PULLUP,
-	WCD_MBHC_EN_NONE,
-};
 
 enum {
 	WCD_MBHC_ELEC_HS_INS,
@@ -214,25 +62,11 @@ enum wcd_mbhc_register_function {
 	WCD_MBHC_HPHL_PA_EN,
 	WCD_MBHC_HPH_PA_EN,
 	WCD_MBHC_SWCH_LEVEL_REMOVE,
+	WCD_MBHC_MOISTURE_VREF,
 	WCD_MBHC_PULLDOWN_CTRL,
 	WCD_MBHC_ANC_DET_EN,
 	WCD_MBHC_FSM_STATUS,
 	WCD_MBHC_MUX_CTL,
-	WCD_MBHC_MOISTURE_STATUS,
-	WCD_MBHC_HPHR_GND,
-	WCD_MBHC_HPHL_GND,
-	WCD_MBHC_HPHL_OCP_DET_EN,
-	WCD_MBHC_HPHR_OCP_DET_EN,
-	WCD_MBHC_HPHL_OCP_STATUS,
-	WCD_MBHC_HPHR_OCP_STATUS,
-	WCD_MBHC_ADC_EN,
-	WCD_MBHC_ADC_COMPLETE,
-	WCD_MBHC_ADC_TIMEOUT,
-	WCD_MBHC_ADC_RESULT,
-	WCD_MBHC_MICB2_VOUT,
-	WCD_MBHC_ADC_MODE,
-	WCD_MBHC_DETECTION_DONE,
-	WCD_MBHC_ELECT_ISRC_EN,
 	WCD_MBHC_REG_FUNC_MAX,
 };
 
@@ -249,11 +83,6 @@ enum wcd_mbhc_plug_type {
 enum pa_dac_ack_flags {
 	WCD_MBHC_HPHL_PA_OFF_ACK = 0,
 	WCD_MBHC_HPHR_PA_OFF_ACK,
-};
-
-enum anc_ack_flags {
-	WCD_MBHC_ANC0_OFF_ACK = 0,
-	WCD_MBHC_ANC1_OFF_ACK,
 };
 
 enum wcd_mbhc_btn_det_mem {
@@ -299,8 +128,6 @@ enum wcd_notify_event {
 	WCD_EVENT_POST_HPHR_PA_OFF,
 	WCD_EVENT_PRE_HPHL_PA_OFF,
 	WCD_EVENT_PRE_HPHR_PA_OFF,
-	WCD_EVENT_OCP_OFF,
-	WCD_EVENT_OCP_ON,
 	WCD_EVENT_LAST,
 };
 
@@ -308,7 +135,6 @@ enum wcd_mbhc_event_state {
 	WCD_MBHC_EVENT_PA_HPHL,
 	WCD_MBHC_EVENT_PA_HPHR,
 };
-
 struct wcd_mbhc_general_cfg {
 	u8 t_ldoh;
 	u8 t_bg_fast_settle;
@@ -411,20 +237,9 @@ enum mbhc_hs_pullup_iref {
 	I_3P0_UA,
 };
 
-enum mbhc_moisture_rref {
-	R_OFF,
-	R_24_KOHM,
-	R_84_KOHM,
-	R_184_KOHM,
-};
-
-struct usbc_ana_audio_config {
-	int usbc_en1_gpio;
-	int usbc_en2_gpio;
-	int usbc_force_gpio;
-	struct device_node *usbc_en1_gpio_p; /* used by pinctrl API */
-	struct device_node *usbc_en2_gpio_p; /* used by pinctrl API */
-	struct device_node *usbc_force_gpio_p; /* used by pinctrl API */
+struct wcd_mbhc_moisture_cfg {
+	enum mbhc_moisture_vref m_vref_ctl;
+	enum mbhc_hs_pullup_iref m_iref_ctl;
 };
 
 struct wcd_mbhc_config {
@@ -432,17 +247,15 @@ struct wcd_mbhc_config {
 	void *calibration;
 	bool detect_extn_cable;
 	bool mono_stero_detection;
-	bool (*swap_gnd_mic)(struct snd_soc_codec *codec, bool active);
+	bool (*swap_gnd_mic)(struct snd_soc_codec *codec);
 	bool hs_ext_micbias;
 	bool gnd_det_en;
 	int key_code[WCD_MBHC_KEYCODE_NUM];
 	uint32_t linein_th;
-	bool moisture_en;
+	struct wcd_mbhc_moisture_cfg moist_cfg;
 	int mbhc_micbias;
 	int anc_micbias;
 	bool enable_anc_mic_detect;
-	u32 enable_usbc_analog;
-	struct usbc_ana_audio_config usbc_analog_cfg;
 };
 
 struct wcd_mbhc_intr {
@@ -463,16 +276,64 @@ struct wcd_mbhc_register {
 	u8 invert;
 };
 
+#define WCD_MBHC_REGISTER(rid, rreg, rmask, rshift, rinvert) \
+{ .id = rid, .reg = rreg, .mask = rmask, .offset = rshift, .invert = rinvert }
+
+#define WCD_MBHC_RSC_LOCK(mbhc)			\
+{							\
+	pr_debug("%s: Acquiring BCL\n", __func__);	\
+	mutex_lock(&mbhc->codec_resource_lock);		\
+	pr_debug("%s: Acquiring BCL done\n", __func__);	\
+}
+
+#define WCD_MBHC_RSC_UNLOCK(mbhc)			\
+{							\
+	pr_debug("%s: Release BCL\n", __func__);	\
+	mutex_unlock(&mbhc->codec_resource_lock);	\
+}
+
+#define WCD_MBHC_RSC_ASSERT_LOCKED(mbhc)		\
+{							\
+	WARN_ONCE(!mutex_is_locked(&mbhc->codec_resource_lock), \
+		  "%s: BCL should have acquired\n", __func__); \
+}
+
+/*
+ * Macros to update and read mbhc register bits. Check for
+ * "0" before updating or reading the register, because it
+ * is possible that one codec wants to write to that bit and
+ * other codec does not.
+ */
+#define WCD_MBHC_REG_UPDATE_BITS(function, val)         \
+do {                                                    \
+	if (mbhc->wcd_mbhc_regs[function].reg) {        \
+		snd_soc_update_bits(mbhc->codec,	\
+		mbhc->wcd_mbhc_regs[function].reg,	\
+		mbhc->wcd_mbhc_regs[function].mask,	\
+		val << (mbhc->wcd_mbhc_regs[function].offset)); \
+	}                                               \
+} while (0)
+
+#define WCD_MBHC_REG_READ(function, val)	        \
+do {                                                    \
+	if (mbhc->wcd_mbhc_regs[function].reg) {        \
+		val = (((snd_soc_read(mbhc->codec,	\
+		mbhc->wcd_mbhc_regs[function].reg)) &	\
+		(mbhc->wcd_mbhc_regs[function].mask)) >> \
+		(mbhc->wcd_mbhc_regs[function].offset)); \
+	}                                               \
+} while (0)
+
 struct wcd_mbhc_cb {
-	int (*enable_mb_source)(struct wcd_mbhc *, bool);
+	int (*enable_mb_source)(struct snd_soc_codec *, bool);
 	void (*trim_btn_reg)(struct snd_soc_codec *);
 	void (*compute_impedance)(struct wcd_mbhc *, uint32_t *, uint32_t *);
 	void (*set_micbias_value)(struct snd_soc_codec *);
 	void (*set_auto_zeroing)(struct snd_soc_codec *, bool);
-	struct firmware_cal * (*get_hwdep_fw_cal)(struct wcd_mbhc *,
+	struct firmware_cal * (*get_hwdep_fw_cal)(struct snd_soc_codec *,
 			enum wcd_cal_type);
 	void (*set_cap_mode)(struct snd_soc_codec *, bool, bool);
-	int (*register_notifier)(struct wcd_mbhc *,
+	int (*register_notifier)(struct snd_soc_codec *,
 				 struct notifier_block *nblock,
 				 bool enable);
 	int (*request_irq)(struct snd_soc_codec *,
@@ -502,20 +363,6 @@ struct wcd_mbhc_cb {
 	int (*mbhc_micb_ctrl_thr_mic)(struct snd_soc_codec *, int, bool);
 	void (*mbhc_gnd_det_ctrl)(struct snd_soc_codec *, bool);
 	void (*hph_pull_down_ctrl)(struct snd_soc_codec *, bool);
-	void (*mbhc_moisture_config)(struct wcd_mbhc *);
-	bool (*hph_register_recovery)(struct wcd_mbhc *);
-	void (*update_anc_state)(struct snd_soc_codec *codec,
-				 bool enable, int anc_num);
-	bool (*is_anc_on)(struct wcd_mbhc *mbhc);
-};
-
-struct wcd_mbhc_fn {
-	irqreturn_t (*wcd_mbhc_hs_ins_irq)(int irq, void *data);
-	irqreturn_t (*wcd_mbhc_hs_rem_irq)(int irq, void *data);
-	void (*wcd_mbhc_detect_plug_type)(struct wcd_mbhc *mbhc);
-	bool (*wcd_mbhc_detect_anc_plug_type)(struct wcd_mbhc *mbhc);
-	void (*wcd_cancel_hs_detect_plug)(struct wcd_mbhc *mbhc,
-					  struct work_struct *work);
 };
 
 struct wcd_mbhc {
@@ -535,12 +382,6 @@ struct wcd_mbhc {
 	bool in_swch_irq_handler;
 	bool hphl_swh; /*track HPHL switch NC / NO */
 	bool gnd_swh; /*track GND switch NC / NO */
-	u32 hs_thr;
-	u32 hph_thr;
-	u32 swap_thr;
-	u32 moist_vref;
-	u32 moist_iref;
-	u32 moist_rref;
 	u8 micbias1_cap_mode; /* track ext cap setting */
 	u8 micbias2_cap_mode; /* track ext cap setting */
 	bool hs_detect_work_stop;
@@ -550,7 +391,6 @@ struct wcd_mbhc {
 	bool is_extn_cable;
 	bool skip_imped_detection;
 	bool is_btn_already_regd;
-	bool extn_cable_hph_rem;
 
 	struct snd_soc_codec *codec;
 	/* Work to perform MBHC Firmware Read */
@@ -560,7 +400,6 @@ struct wcd_mbhc {
 
 	/* track PA/DAC state to sync with userspace */
 	unsigned long hph_pa_dac_state;
-	unsigned long hph_anc_state;
 	unsigned long event_state;
 	unsigned long jiffies_atreport;
 
@@ -588,34 +427,105 @@ struct wcd_mbhc {
 	struct mutex hphl_pa_lock;
 	struct mutex hphr_pa_lock;
 
-	/* Holds mbhc detection method - ADC/Legacy */
-	unsigned int mbhc_detection_logic;
-
 	unsigned long intr_status;
-	bool is_hph_ocp_pending;
-
-	bool usbc_force_pr_mode;
-	int usbc_mode;
-	struct notifier_block psy_nb;
-	struct power_supply *usb_psy;
-	struct work_struct usbc_analog_work;
-
-	struct wcd_mbhc_fn *mbhc_fn;
-	bool force_linein;
 };
+#define WCD_MBHC_CAL_SIZE(buttons, rload) ( \
+	sizeof(struct wcd_mbhc_general_cfg) + \
+	sizeof(struct wcd_mbhc_plug_detect_cfg) + \
+	((sizeof(s16) + sizeof(s16)) * buttons) + \
+	    sizeof(struct wcd_mbhc_plug_type_cfg) + \
+	sizeof(struct wcd_mbhc_btn_detect_cfg) + \
+	sizeof(struct wcd_mbhc_imped_detect_cfg) + \
+		((sizeof(u16) + sizeof(u16)) * rload) \
+	)
 
-void wcd_mbhc_find_plug_and_report(struct wcd_mbhc *mbhc,
-				   enum wcd_mbhc_plug_type plug_type);
-void wcd_mbhc_hs_elec_irq(struct wcd_mbhc *mbhc, int irq_type, bool enable);
-void wcd_mbhc_elec_hs_report_unplug(struct wcd_mbhc *mbhc);
-bool wcd_swch_level_remove(struct wcd_mbhc *mbhc);
-void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
-			     const enum wcd_mbhc_cs_mb_en_flag cs_mb_en);
-void wcd_mbhc_jack_report(struct wcd_mbhc *mbhc,
-			  struct snd_soc_jack *jack, int status, int mask);
-int wcd_cancel_btn_work(struct wcd_mbhc *mbhc);
-int wcd_mbhc_get_button_mask(struct wcd_mbhc *mbhc);
-void wcd_mbhc_report_plug(struct wcd_mbhc *mbhc, int insertion,
-			enum snd_jack_types jack_type);
 
+#define WCD_MBHC_CAL_GENERAL_PTR(cali) ( \
+	(struct wcd_mbhc_general_cfg *) cali)
+#define WCD_MBHC_CAL_PLUG_DET_PTR(cali) ( \
+	(struct wcd_mbhc_plug_detect_cfg *) \
+	&(WCD_MBHC_CAL_GENERAL_PTR(cali)[1]))
+#define WCD_MBHC_CAL_PLUG_TYPE_PTR(cali) ( \
+	(struct wcd_mbhc_plug_type_cfg *) \
+	&(WCD_MBHC_CAL_PLUG_DET_PTR(cali)[1]))
+#define WCD_MBHC_CAL_BTN_DET_PTR(cali) ( \
+	    (struct wcd_mbhc_btn_detect_cfg *) \
+	&(WCD_MBHC_CAL_PLUG_TYPE_PTR(cali)[1]))
+#define WCD_MBHC_CAL_IMPED_DET_PTR(cali) ( \
+	(struct wcd_mbhc_imped_detect_cfg *) \
+	(((void *)&WCD_MBHC_CAL_BTN_DET_PTR(cali)[1]) + \
+	(WCD_MBHC_CAL_BTN_DET_PTR(cali)->num_btn * \
+	(sizeof(WCD_MBHC_CAL_BTN_DET_PTR(cali)->_v_btn_low[0]) + \
+	sizeof(WCD_MBHC_CAL_BTN_DET_PTR(cali)->_v_btn_high[0])))) \
+	)
+
+#define WCD_MBHC_CAL_MIN_SIZE ( \
+	sizeof(struct wcd_mbhc_general_cfg) + \
+	sizeof(struct wcd_mbhc_plug_detect_cfg) + \
+	sizeof(struct wcd_mbhc_plug_type_cfg) + \
+	sizeof(struct wcd_mbhc_btn_detect_cfg) + \
+	sizeof(struct wcd_mbhc_imped_detect_cfg) + \
+	(sizeof(u16)*2)  \
+	)
+
+#define WCD_MBHC_CAL_BTN_SZ(cfg_ptr) ( \
+	sizeof(struct wcd_mbhc_btn_detect_cfg) + \
+	(cfg_ptr->num_btn * (sizeof(cfg_ptr->_v_btn_low[0]) + \
+			sizeof(cfg_ptr->_v_btn_high[0]))))
+
+#define WCD_MBHC_CAL_IMPED_MIN_SZ ( \
+	sizeof(struct wcd_mbhc_imped_detect_cfg) + sizeof(u16) * 2)
+
+#define WCD_MBHC_CAL_IMPED_SZ(cfg_ptr) ( \
+	sizeof(struct wcd_mbhc_imped_detect_cfg) + \
+	(cfg_ptr->_n_rload * \
+	(sizeof(cfg_ptr->_rload[0]) + sizeof(cfg_ptr->_alpha[0]))))
+
+#ifdef CONFIG_SND_SOC_WCD_MBHC
+int wcd_mbhc_set_keycode(struct wcd_mbhc *mbhc);
+int wcd_mbhc_start(struct wcd_mbhc *mbhc,
+		       struct wcd_mbhc_config *mbhc_cfg);
+void wcd_mbhc_stop(struct wcd_mbhc *mbhc);
+int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
+		      const struct wcd_mbhc_cb *mbhc_cb,
+		      const struct wcd_mbhc_intr *mbhc_cdc_intr_ids,
+		      struct wcd_mbhc_register *mbhc_reg,
+		      bool impedance_det_en);
+int wcd_mbhc_get_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
+			   uint32_t *zr);
+void wcd_mbhc_deinit(struct wcd_mbhc *mbhc);
+#else
+static inline void wcd_mbhc_stop(struct wcd_mbhc *mbhc)
+{
+	return;
+}
+static inline int wcd_mbhc_init(struct wcd_mbhc *mbhc,
+				struct snd_soc_codec *codec,
+				const struct wcd_mbhc_cb *mbhc_cb,
+				const struct wcd_mbhc_intr *mbhc_cdc_intr_ids,
+				struct wcd_mbhc_register *mbhc_reg,
+				bool impedance_det_en)
+{
+	return 0;
+}
+static inline int wcd_mbhc_start(struct wcd_mbhc *mbhc,
+				 struct wcd_mbhc_config *mbhc_cfg)
+{
+	return 0;
+}
+static inline int wcd_mbhc_get_impedance(struct wcd_mbhc *mbhc,
+					 uint32_t *zl,
+					 uint32_t *zr)
+{
+	*zl = 0;
+	*zr = 0;
+	return -EINVAL;
+}
+static inline void wcd_mbhc_deinit(struct wcd_mbhc *mbhc)
+{
+}
+#endif
+#ifdef CONFIG_MACH_XIAOMI_MARKW
+extern void msm8x16_wcd_codec_set_headset_state(u32 state);
+#endif
 #endif /* __WCD_MBHC_V2_H__ */

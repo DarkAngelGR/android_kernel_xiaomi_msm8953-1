@@ -10,6 +10,16 @@
  * GNU General Public License for more details.
  */
 
+&firmware {
+	android {
+		fstab {
+			vendor {
+				dev = "/dev/block/platform/soc/7824900.sdhci/by-name/cust";
+			};
+		};
+	};
+};
+
 &spmi_bus {
 	qcom,pm8953@0 {
 		qcom,power-on@800 {
@@ -66,19 +76,29 @@
                 qcom,current = <750>;
             };
             pmi8950_flash1: qcom,flash_1 {
+                label = "flash";
+                qcom,led-name = "led:flash_1";
+                qcom,default-led-trigger = "flash1_trigger";
+                qcom,max-current = <1000>;
+                qcom,duration = <1280>;
+                qcom,id = <1>;
                 qcom,current = <750>;
             };
             pmi8950_torch0: qcom,torch_0 {
                 qcom,current = <100>;
             };
             pmi8950_torch1: qcom,torch_1 {
+                label = "torch";
+                qcom,led-name = "led:torch_1";
+                qcom,default-led-trigger = "torch1_trigger";
+                qcom,max-current = <200>;
+                qcom,id = <1>;
                 qcom,current = <100>;
             };
             pmi8950_torch2: qcom,torch_2 {
 				label = "torch";
 				qcom,led-name = "flashlight";
-				qcom,default-led-trigger =
-						"torch2_trigger";
+				qcom,default-led-trigger = "torch2_trigger";
 				qcom,max-current = <200>;
 				qcom,id = <1>;
 				qcom,current = <100>;
@@ -100,6 +120,15 @@
 };
 
 &soc {
+	led_flash0: qcom,camera-flash {
+		cell-index = <0>;
+		compatible = "qcom,camera-flash";
+		qcom,flash-type = <1>;
+		qcom,flash-source = <&pmi8950_flash0 &pmi8950_flash1>;
+		qcom,torch-source = <&pmi8950_torch0 &pmi8950_torch1 &pmi8950_torch2>;
+		qcom,switch-source = <&pmi8950_switch>;
+	};
+
 	sn_fuse: snfuse@0xa0128 {
 		compatible = "qcom,sn-fuse";
 		reg = <0xa0128 0x4>;
@@ -328,57 +357,43 @@
 	};
 };
 
-&i2c_2  { 
-	aw2013@45 {
-		compatible = "awinc,aw2013";
+&i2c_2  { /* i2c 6 */
+	aw2013@45 { /*blink */
+		compatible = "awinic,aw2013";
 		reg = <0x45>;
 		rgb_led-supply = <&pm8953_l10>;
-		red {
-			label = "red";
-			linux,default-trigger = "battery-red";
-			default-state = "off";
-			retain-state-suspended;
-		};
+		aw2013,red {
+				aw2013,name = "red";
+				aw2013,id = <0>;
+				aw2013,max-brightness = <255>;
+				aw2013,max-current = <1>;
+				aw2013,rise-time-ms = <3>;
+				aw2013,hold-time-ms = <1>;
+				aw2013,fall-time-ms = <3>;
+				aw2013,off-time-ms = <3>;
+			};
 
-		green {
-			label = "green";
-			linux,default-trigger = "battery-green";
-			default-state = "off";
-			retain-state-suspended;
-		};
+			aw2013,green {
+				aw2013,name = "green";
+				aw2013,id = <1>;
+				aw2013,max-brightness = <255>;
+				aw2013,max-current = <1>;
+				aw2013,rise-time-ms = <3>;
+				aw2013,hold-time-ms = <1>;
+				aw2013,fall-time-ms = <3>;
+				aw2013,off-time-ms = <3>;
+			};
 
-		blue {
-			label = "blue";
-			linux,default-trigger = "battery-blue";
-			default-state = "off";
-			retain-state-suspended;
-		};
-		white {
-			label = "white";
-			linux,default-trigger = "none";
-			default-state = "off";
-			retain-state-suspended;
-		};
-
-		yellow {
-			label = "yellow";
-			linux,default-trigger = "none";
-			default-state = "off";
-			retain-state-suspended;
-		};
-
-		cyan {
-			label = "cyan";
-			linux,default-trigger = "none";
-			default-state = "off";
-			retain-state-suspended;
-		};
-		purple {
-			label = "purple";
-			linux,default-trigger = "none";
-			default-state = "off";
-			retain-state-suspended;
-		};
+			aw2013,blue {
+				aw2013,name = "blue";
+				aw2013,id = <2>;
+				aw2013,max-brightness = <255>;
+				aw2013,max-current = <1>;
+				aw2013,rise-time-ms = <3>;
+				aw2013,hold-time-ms = <1>;
+				aw2013,fall-time-ms = <3>;
+				aw2013,off-time-ms = <3>;
+			};
 
 	};
 
@@ -393,31 +408,4 @@
         #include "battery/MARKW-qrd-Feimaotui-4v4-4000mah.dtsi"
         #include "battery/MARKW-qrd-Default-4v4-4000mah.dtsi"
         /delete-node/ qcom,qrd_msm8937_sku1_2920mah;
-};
-
-&flash_led {
-    pmi8950_flash1: qcom,flash_1 {
-        label = "flash";
-        qcom,led-name = "led:flash_1";
-        qcom,default-led-trigger =
-                        "flash1_trigger";
-        qcom,max-current = <1000>;
-        qcom,duration = <1280>;
-        qcom,id = <1>;
-        qcom,current = <625>;
-    };
-    pmi8950_torch1: qcom,torch_1 {
-        label = "torch";
-        qcom,led-name = "led:torch_1";
-        qcom,default-led-trigger =
-                        "torch1_trigger";
-        qcom,max-current = <200>;
-        qcom,id = <1>;
-        qcom,current = <120>;
-    };
-};
-
-&led_flash0{
-	qcom,flash-source = <&pmi8950_flash0 &pmi8950_flash1>;
-	qcom,torch-source = <&pmi8950_torch0 &pmi8950_torch1 &pmi8950_torch2>;
 };

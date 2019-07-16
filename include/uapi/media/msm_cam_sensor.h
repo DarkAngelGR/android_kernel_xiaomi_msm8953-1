@@ -86,8 +86,6 @@ enum sensor_sub_module_t {
 	SUB_MODULE_CSIPHY_3D,
 	SUB_MODULE_OIS,
 	SUB_MODULE_EXT,
-	SUB_MODULE_IR_LED,
-	SUB_MODULE_IR_CUT,
 	SUB_MODULE_MAX,
 	SUB_MODULE_LASER_LED,
 };
@@ -290,16 +288,6 @@ struct msm_eeprom_info_t {
 	struct msm_sensor_power_setting_array *power_setting_array;
 	enum i2c_freq_mode_t i2c_freq_mode;
 	struct msm_eeprom_memory_map_array *mem_map_array;
-};
-
-struct msm_ir_led_cfg_data_t {
-	enum msm_ir_led_cfg_type_t cfg_type;
-	int32_t pwm_duty_on_ns;
-	int32_t pwm_period_ns;
-};
-
-struct msm_ir_cut_cfg_data_t {
-	enum msm_ir_cut_cfg_type_t cfg_type;
 };
 
 struct msm_laser_led_cfg_data_t {
@@ -621,12 +609,6 @@ struct sensor_init_cfg_data {
 
 #define VIDIOC_MSM_FLASH_QUERY_DATA \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 15, struct msm_flash_query_data_t)
-
-#define VIDIOC_MSM_IR_LED_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 15, struct msm_ir_led_cfg_data_t)
-
-#define VIDIOC_MSM_IR_CUT_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 15, struct msm_ir_cut_cfg_data_t)
 
 #define VIDIOC_MSM_LASER_LED_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 16, struct msm_laser_led_cfg_data_t)

@@ -29,6 +29,12 @@ config MSM_CAMERA_DEBUG
     ---help---
       Enable printk() debug for msm camera
 
+if MACH_XIAOMI_MARKW
+if MSMB_CAMERA
+source "drivers/media/platform/msm/camera_v2_markw/Kconfig"
+endif # MSMB_CAMERA
+endif
+
 menuconfig MSMB_CAMERA
     bool "QTI MSM camera and video capture 2.0 support"
     depends on ARCH_QCOM && VIDEO_V4L2 && I2C
